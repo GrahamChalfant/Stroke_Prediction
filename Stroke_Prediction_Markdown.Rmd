@@ -11,9 +11,13 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
-
+library(caTools) #Data partitioning 
+library(e1071)
+library(caret)
+library(ROSE)
 ```
 
+## Data Preparation
 ```{r}
 data <- read.csv("healthcare-dataset-stroke-data.csv", stringsAsFactors = TRUE)
 
@@ -27,15 +31,120 @@ str(data)#Need to change data type for some varaibles
 #Change hypertension and heart_disease to factor 
 data$hypertension <- as.factor(data$hypertension)
 data$heart_disease <- as.factor(data$heart_disease)
+data$stroke <- as.factor(data$stroke)
 
 #bmi is continuous
 data$bmi <- as.numeric(data$bmi)
 
+#Remove id as it does not add to the analysis 
+data$id <- NULL
+
 ```
 
 
-Data 
+## Partitioning Data
 ```{r}
+#Set seed
+set.seed(10)
+
+# Generate a vector partition for data partitioning 
+partition <- sample.split(data$stroke, SplitRatio = .70) 
+
+training <- subset(data, partition == "TRUE")
+
+test <- subset(data, partition == "FALSE")
 
 ```
+
+```{r}
+prop.table(table(training$stroke))#Strokes make up 5% of total observations - this is underrepresented 
+
+#Oversampling because actual strokes are underrepresented 
+oversampled_training <- ovun.sample(stroke ~. , data = training, method = "over", p= 0.5, seed=1)$data
+
+prop.table(table(oversampled_training$stroke))#Stroke observations are now balanced 
+
+```
+
+## Modelling SVM oversampled data
+```{r}
+# Build SVM model by using svm() function
+svm_radial_over <- svm(stroke ~.,oversampled_training, kernel = "radial", scale = TRUE)
+
+# Print svm_radial
+svm_radial_over
+
+
+```
+
+
+```{r  message=FALSE}
+
+set.seed(10)
+
+# Find the best cost value among the list (0.1, 1, 5) 
+tune_out_over <- tune(svm, stroke ~., data =  oversampled_training, kernel = "radial", 
+                ranges =list(cost=c(0.1, 1, 5)))
+
+# Check the summary of output of tune()
+summary(tune_out_over)
+```
+
+
+```{r  message=FALSE}
+# Save the best model as svm_best
+svm_best_over <- tune_out_over$best.model
+
+```
+
+
+```{r  message=FALSE}
+
+# Predicting the Test set results 
+svm_predict_over <- predict(svm_best_over, test)
+
+```
+
+ 
+```{r}
+#Confusion matrix for test set predictions 
+(cf_svm_over <- confusionMatrix(svm_predict_over, test$stroke, positive = "1", mode = "prec_recall"))
+
+#Accuracy is not as good with oversampled data but recall is much higher - 64% of people that had strokes were predicted correctly 
+
+
+#Checking for overfitting 
+ svm_predict_overfit <- predict(svm_best, oversampled_training)
+ 
+#Confusion matrix for predicting training set 
+(cf_svm_overfit <- confusionMatrix(svm_predict_overfit, oversampled_training$stroke, positive = "1", mode = "prec_recall"))
+```
+
+
+
+### Modelling with K-cross fold validation 
+```{r}
+#k-cross fold validated model 
+tuned <- tune.svm(stroke~., data = oversampled_training, gamma = 10^-2, cost = 10^2, tunecontrol=tune.control(cross=10))
+```
+
+
+```{r}
+#Extracting best model from tuned
+svmfit<- tuned$best.model
+#Predicting test data with best model 
+svmfit_predict <- predict(svmfit, test)
+#Creating confusion matrix for test data predictions 
+confusionMatrix(svmfit_predict, test$stroke, positive = "1", mode = "prec_recall")
+
+#Using model to predict training data for overfitting 
+svmfit_predict_overfitting <- predict(svmfit, oversampled_training)
+#Confusion matrix of overfit data
+confusionMatrix(svmfit_predict_overfitting, oversampled_training$stroke, positive = "1", mode = "prec_recall")
+
+```
+
+
+
+
 
