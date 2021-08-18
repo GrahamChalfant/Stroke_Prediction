@@ -1,0 +1,41 @@
+---
+title: "Stroke_Prediction_RMD"
+author: "Graham Chalfant"
+date: "8/18/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+```
+
+```{r}
+data <- read.csv("healthcare-dataset-stroke-data.csv", stringsAsFactors = TRUE)
+
+View(data)
+
+summary(data)# Dont see any NAs and it seems that there are no extreme points
+
+str(data)#Need to change data type for some varaibles 
+
+
+#Change hypertension and heart_disease to factor 
+data$hypertension <- as.factor(data$hypertension)
+data$heart_disease <- as.factor(data$heart_disease)
+
+#bmi is continuous
+data$bmi <- as.numeric(data$bmi)
+
+```
+
+
+Data 
+```{r}
+
+```
+
