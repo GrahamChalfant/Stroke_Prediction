@@ -57,14 +57,30 @@ data <- data %>% filter(gender != 'Other')#Removed single observation
 ```
 
 
+```{r}
+
+data <- data %>% mutate(age_group = ifelse(between(data$age, 0, 10), "0-10", 
+                                      ifelse(between(data$age, 11, 20), "11-20",
+                                             ifelse(between(data$age, 21, 30), "21-30", 
+                                                    ifelse(between(data$age, 31, 40), "31-40",
+                                                           ifelse(between(data$age, 41, 50), "41-50",
+                                                                 ifelse(between(data$age, 51, 60), "51-60",
+                                                                        ifelse(between(data$age, 61, 70), "61-70", "71-82"))))))))
+                                                                            
+#Factor the age groups
+
+```
+
+
 ## Data Exploration 
 ```{r}
 ggplot(data, aes(x = age, y = bmi, color = stroke)) + geom_point() + labs(title = "Stoke by Age and Average Glucose Level", x = "Age", y = "BMI", color = "Stroke") 
 ```
 
 ```{r}
-ggplot(data, aes(x = age, fill = stroke)) + geom_histogram() + facet_wrap(data$gender) + labs(title = "Stroke by Age and Gender", x = "Age", y = "Frequency")
+ggplot(data, aes(x = age_group, fill = stroke)) + geom_bar() + facet_wrap(data$gender) + labs(title = "Stroke by Age and Gender", x = "Age", y = "Frequency")+ theme(axis.text.x = element_text(angle = 35, hjust=1))
 
+ggsave("stoke_by_age_and_gender.png")
 ```
 
 ```{r}
