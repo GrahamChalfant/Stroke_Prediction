@@ -7,40 +7,81 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+#https://rpubs.com/bharath2925/strokeprediction
 ```
 
-```{r}
+```{r, echo=FALSE}
 library(tidyverse)
 library(caTools) #Data partitioning 
 library(e1071)
 library(caret)
 library(ROSE)
 library(randomForest)
+library(DMwR)
 ```
 
 ## Data Preparation
 ```{r}
-data <- read.csv("healthcare-dataset-stroke-data.csv", stringsAsFactors = TRUE)
+data <- read_csv("healthcare-dataset-stroke-data.csv")
 
-View(data)
+#View(data)
 
-summary(data)# Dont see any NAs and it seems that there are no extreme points
+summary(data)# 201 NA's in BMI 
 
-str(data)#Need to change data type for some varaibles 
-
-
-#Change hypertension and heart_disease to factor 
-data$hypertension <- as.factor(data$hypertension)
-data$heart_disease <- as.factor(data$heart_disease)
-data$stroke <- as.factor(data$stroke)
-
-#bmi is continuous
-data$bmi <- as.numeric(data$bmi)
-
-#Remove id as it does not add to the analysis 
+#Remove id - does not add to the analysis 
 data$id <- NULL
 
+#Remove N/A values from BMI - na.omit() was not working 
+data <- data %>% filter(bmi != "N/A") 
+
+
+str(data)#Need to change data type for some variables 
+
+#Change hypertension and heart_disease to factor 
+data$gender <- as.factor(data$gender)
+data$hypertension<- factor(data$hypertension, levels = c(0,1), labels = c("No", "Yes"))
+data$heart_disease<- factor(data$heart_disease, levels = c(0,1), labels = c("No", "Yes"))
+data$ever_married <- as.factor(data$ever_married)
+data$work_type <- as.factor(data$work_type)
+data$Residence_type <- as.factor(data$Residence_type)
+data$bmi<-as.numeric(data$bmi)
+data$smoking_status <- as.factor(data$smoking_status)
+data$stroke<- factor(data$stroke, levels = c(0,1), labels = c("No", "Yes"))
+
+summary(data)
+
+table(data$gender)#only one 'other' gender 
+
+data <- data %>% filter(gender != 'Other')#Removed single observation 
 ```
+
+
+## Data Exploration 
+```{r}
+ggplot(data, aes(x = age, y = bmi, color = stroke)) + geom_point() + labs(title = "Stoke by Age and Average Glucose Level", x = "Age", y = "BMI", color = "Stroke") 
+```
+
+```{r}
+ggplot(data, aes(x = age, fill = stroke)) + geom_histogram() + facet_wrap(data$gender) + labs(title = "Stroke by Age and Gender", x = "Age", y = "Frequency")
+
+```
+
+```{r}
+ggplot(data, aes(x = age, fill = stroke)) + geom_histogram() + facet_wrap(data$work_type) + labs(title = "Stroke by Age and Work Type", x = "Age", y = "Frequency")
+```
+
+
+```{r}
+boxplot.stats(data$avg_glucose_level)
+boxplot(data$avg_glucose_level)
+data <- data %>% filter(avg_glucose_level <= 170)
+
+boxplot.stats(data$bmi)
+boxplot(data$bmi)
+data <- data %>% filter(bmi <= 50)
+```
+
 
 
 ## Partitioning Data
@@ -55,123 +96,122 @@ training <- subset(data, partition == "TRUE")
 
 test <- subset(data, partition == "FALSE")
 
+table(training$stroke)#Data is highly imbalanced 
+
 ```
+
+
+
+
+
+### RF tuned
 
 ```{r}
-prop.table(table(training$stroke))#Strokes make up 5% of total observations - this is underrepresented 
 
-#Oversampling because actual strokes are underrepresented 
-oversampled_training <- ovun.sample(stroke ~. , data = training, method = "over", p= 0.5, seed=1)$data
+# subset function will take a subset from our training data by excluding CLASS column (or target variable)
+trainingFeatures = subset(training, select = -stroke )
 
-prop.table(table(oversampled_training$stroke))#Stroke observations are now balanced 
+# Set the seed for reproducibility
+set.seed(111)
+tuneRF(trainingFeatures, training$stroke, mtryStart = 3, ntree = 800, stepFactor = 1.5, improve = 0.01)
+
+#mtry = 3 has the samllest error rate
 
 ```
 
-## Modelling SVM oversampled data
+```{r  message=FALSE, eval = FALSE}
+
+
+# Build Random Forest model and assign it to RF_model
+RF_model <- randomForest(stroke~., training, mtry = 3, ntree = 800)
+
+# Predict the class of the test data
+prediction_RF <- predict(RF_model, test)
+
+# Confusion matrix
+confusionMatrix(predict(model_RF, test), test$stroke)
+
+```
+
+
+
+### RF overfitting check 
 ```{r}
-# Build SVM model by using svm() function
-svm_radial_over <- svm(stroke ~.,oversampled_training, kernel = "radial", scale = TRUE)
+prediction_RF_fit <- predict(RF_model, training)
 
-# Print svm_radial
-svm_radial_over
-
+# Confusion matrix
+confusionMatrix(predict(RF_model, training), training$stroke) #Overfit but not as bad as oversampled data
 
 ```
 
 
-```{r  message=FALSE}
-
-set.seed(10)
-
-# Find the best cost value among the list (0.1, 1, 5) 
-tune_out_over <- tune(svm, stroke ~., data =  oversampled_training, kernel = "radial", 
-                ranges =list(cost=c(0.1, 1, 5)))
-
-# Check the summary of output of tune()
-summary(tune_out_over)
-```
-
-
-```{r  message=FALSE}
-# Save the best model as svm_best
-svm_best_over <- tune_out_over$best.model
-
-```
-
-
-```{r  message=FALSE}
-
-# Predicting the Test set results 
-svm_predict_over <- predict(svm_best_over, test)
-
-```
-
- 
-```{r}
-#Confusion matrix for test set predictions 
-(cf_svm_over <- confusionMatrix(svm_predict_over, test$stroke, positive = "1", mode = "prec_recall"))
-
-#Accuracy is not as good with oversampled data but recall is much higher - 64% of people that had strokes were predicted correctly 
-
-
-#Checking for overfitting 
- svm_predict_overfit <- predict(svm_best, oversampled_training)
- 
-#Confusion matrix for predicting training set 
-(cf_svm_overfit <- confusionMatrix(svm_predict_overfit, oversampled_training$stroke, positive = "1", mode = "prec_recall"))
-```
-
-
-
-### Modelling with K-cross fold validation 
-```{r}
-#k-cross fold validated model 
-tuned <- tune.svm(stroke~., data = oversampled_training, cost=seq(from=0.005, to=1,by=0.005), gamma = 1,   tunecontrol=tune.control(cross=10))
-```
-
+### RF tuned with oversampled data
 
 ```{r}
-#Extracting best model from tuned
-svmfit<- tuned$best.model
-#Predicting test data with best model 
-svmfit_predict <- predict(svmfit, test)
-#Creating confusion matrix for test data predictions 
-confusionMatrix(svmfit_predict, test$stroke, positive = "1", mode = "prec_recall")
 
-#Using model to predict training data for overfitting 
-svmfit_predict_overfitting <- predict(svmfit, oversampled_training)
-#Confusion matrix of overfit data
-confusionMatrix(svmfit_predict_overfitting, oversampled_training$stroke, positive = "1", mode = "prec_recall")
+# subset function will take a subset from our training data by excluding CLASS column (or target variable)
+trainingFeaturesOver = subset(over.training, select = -stroke )
+
+# Set the seed for reproducibility
+set.seed(111)
+tuneRF(trainingFeaturesOver, over.training$stroke, mtryStart = 3, ntree = 800, stepFactor = 1.5, improve = 0.01)
+
+#mtry = 4 has the smallest error rate
+
+```
+
+```{r  message=FALSE, eval = FALSE}
+
+
+# Build Random Forest model and assign it to RF_model
+RF_model_over <- randomForest(stroke~., over.training, mtry = 4, ntree = 800)
+
+# Predict the class of the test data
+prediction_RF_over <- predict(RF_model_over, test)
+
+# Confusion matrix
+confusionMatrix(predict(RF_model_over, test), test$stroke)
 
 ```
 
 
-
-
-### Random Forest
+### RF overfitting check 
 ```{r}
-model_RF <- randomForest(stroke~., oversampled_training)
+prediction_RF_over_fit <- predict(RF_model_over, over.training)
 
-print(model_RF)
-
-importance(model_RF)
-
-prediction_RF <- predict(model_RF, test)
-
-confusionMatrix(prediction_RF, test$stroke, positive='1', mode = "prec_recall")
-```
-
-
-
-### Decision Tree Visual 
-
-```{r  message=FALSE}
-# Build a decision tree by using ctree() function
-decTree <- ctree(stroke ~. , data = oversampled_training)
-
-# Print decTree
-print(decTree)
-
-plot(decTree, type='simple')
+# Confusion matrix
+confusionMatrix(predict(RF_model_over, over.training), over.training$stroke) #very overfit 
 
 ```
+
+
+#Plotting results
+
+```{r  message=FALSE, eval = FALSE}
+library(pROC)
+
+# Obtain class probabilities by using predict() and adding type = "prob" for Random Forest
+RF_prob <- predict(RF_model, test, type = "prob")  #the second column belongs to churn
+
+
+ROC_RF <- roc(test$stroke, RF_prob[ ,2])
+
+# Extract required data from ROC_RF
+df_RF = data.frame((1-ROC_RF$specificities), ROC_RF$sensitivities)
+
+```
+
+```{r  message=FALSE, eval = FALSE}
+
+#plot the ROC curve for random forst
+
+plot(ROC_RF, col="red", type="l", 
+xlab="False Positive Rate (1-Specificity)", ylab="True Positive Rate (Sensitivity)")          #adds ROC curve for SVM
+lines(ROC_RF, col="green")              
+
+
+abline(a = 0, b = 1, col = "lightgray") #adds a diagonal line
+
+
+```
+
